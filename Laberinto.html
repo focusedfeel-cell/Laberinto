@@ -1,0 +1,452 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Laberinto Cibernético - Escape Room</title>
+<style>
+:root {
+  --bg: #070b12;
+  --panel: #0a0f1a;
+  --neon: #0066ff;
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: #e0faff;
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  overflow: hidden;
+}
+header {
+  padding: 10px 12px;
+  color: #2a6cff;
+  font-weight: 700;
+  text-shadow: 0 0 8px var(--neon), 0 0 18px var(--neon);
+}
+.wrap { position: relative; }
+canvas { display: block; touch-action: none; user-select: none; border-radius: 14px; }
+#maze { 
+  border: 2px solid #2a6cff; 
+  box-shadow: 0 0 28px rgba(0,102,255,.9); 
+}
+#victory, #timeout, #morsePanel {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: rgba(0,0,0,.85);
+  color: #fff;
+  font-size: clamp(22px, 4vw, 32px);
+  font-weight: 800;
+  letter-spacing:.3px;
+  visibility: hidden;
+  z-index: 20;
+}
+.panel { position:absolute; inset:8px; border-radius: 12px; pointer-events: none; box-shadow: inset 0 0 40px rgba(0,224,255,.15); }
+
+/* Panel de instrucciones */
+#instrucciones {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,.92);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  text-align: center;
+  padding: 20px;
+  gap: 20px;
+  z-index: 10;
+}
+#instrucciones h2 {
+  color: #2a6cff;
+  font-size: 1.8em;
+  text-shadow: 0 0 8px #2a6cff, 0 0 16px #2a6cff;
+}
+#instrucciones p {
+  max-width: 400px;
+  line-height: 1.5em;
+}
+#btnJugar {
+  background: #2a6cff;
+  border: none;
+  color: #000;
+  font-weight: bold;
+  padding: 12px 24px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 1.1em;
+  box-shadow: 0 0 12px #2a6cff;
+}
+#btnJugar:hover {
+  background: #39f;
+  color: #fff;
+}
+
+/* Contador */
+#timer {
+  font-size: 1.3em;
+  font-weight: bold;
+  color: #39d0ff;
+  text-shadow: 0 0 8px #00e0ff;
+}
+
+/* Panel morse */
+#morsePanel {
+  flex-direction: column;
+  gap: 20px;
+}
+#morsePanel button {
+  background: #2a6cff;
+  border: none;
+  color: #000;
+  font-weight: bold;
+  padding: 12px 24px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 1.1em;
+  box-shadow: 0 0 12px #2a6cff;
+}
+#morsePanel button:hover {
+  background: #39f;
+  color: #fff;
+}
+</style>
+</head>
+<body>
+<header>Laberinto Cibernético</header>
+
+<!-- Panel de instrucciones -->
+<div id="instrucciones">
+  <h2>Instrucciones</h2>
+  <p>
+    <strong>Laberinto 50</strong><br><br>
+    Estás un paso más cerca del antídoto.<br>
+    Tenés 50 segundos para encontrar la salida.<br>
+    El recorrido comienza en el extremo superior izquierdo del laberinto.<br><br>
+    ⚠️ Atención: el movimiento del cursor no será tan sencillo… el rozamiento con las paredes puede enlentecer tu trayecto.<br><br>
+    ¿Listo para poner a prueba tu precisión y rapidez?
+  </p>
+  <button id="btnJugar">JUGAR</button>
+</div>
+
+<!-- Laberinto -->
+<div class="wrap" style="display:none;">
+  <div id="timer">Tiempo: 50</div>
+  <canvas id="maze"></canvas>
+  <div class="panel"></div>
+</div>
+
+<!-- Mensajes -->
+<div id="victory">¡Escape logrado!</div>
+<div id="timeout">⏳ Tiempo agotado</div>
+
+<!-- Panel de reproducción -->
+<div id="morsePanel">
+  <button id="btnPlay">▶ REPRODUCIR</button>
+
+  <input type="range" id="morseSeek" min="0" max="100" value="0" step="1" style="width:300px;">
+
+  <div id="player" style="margin-top:15px; display:none;">
+    <audio id="morseAudio" controls></audio>
+  </div>
+</div>
+
+<script>
+// ====== Timer ======
+let tiempoRestante = 50;
+let intervalo;
+
+function iniciarTimer(){
+  tiempoRestante = 50;
+  document.getElementById("timer").textContent = "Tiempo: " + tiempoRestante;
+  clearInterval(intervalo);
+  intervalo = setInterval(()=>{
+    tiempoRestante--;
+    document.getElementById("timer").textContent = "Tiempo: " + tiempoRestante;
+    if(tiempoRestante <= 0){
+      clearInterval(intervalo);
+      document.getElementById('timeout').style.visibility = 'visible';
+      setTimeout(()=>{ reiniciarJuego(); },2000);
+    }
+  },1000);
+}
+
+// ====== Mostrar juego tras instrucciones ======
+const btnJugar = document.getElementById('btnJugar');
+btnJugar.addEventListener('click', ()=>{
+  document.getElementById('instrucciones').style.display = 'none';
+  document.querySelector('.wrap').style.display = 'block';
+  reiniciarJuego();
+});
+
+// ====== Laberinto ======
+const cols = 19, rows = 13, cellSize = 36, padding = 24, wallThickness = 8, playerRadius = 10;
+let seed = 42;
+const startColor = '#33ff99';
+const goalColor = '#ff3df6';
+const canvas = document.getElementById('maze');
+const ctx = canvas.getContext('2d');
+canvas.width  = cols * cellSize + padding * 2;
+canvas.height = rows * cellSize + padding * 2;
+
+// PRNG
+function random() { seed = (seed * 9301 + 49297) % 233280; return seed / 233280; }
+function shuffle(a){ for (let i=a.length-1;i>0;i--){ const j=Math.floor(random()*(i+1)); [a[i],a[j]]=[a[j],a[i]];} return a; }
+
+// Generación laberinto
+const DIRS = [
+  { dx:0, dy:-1, wall:'N', opp:'S' },
+  { dx:1, dy:0, wall:'E', opp:'W' },
+  { dx:0, dy:1, wall:'S', opp:'N' },
+  { dx:-1, dy:0, wall:'W', opp:'E' }
+];
+function generateMaze(){
+  const cells = Array.from({length: rows}, ()=>Array.from({length: cols}, ()=>({N:true,E:true,S:true,W:true,v:false})));
+  const stack = [];
+  cells[0][0].v=true;
+  stack.push({x:0,y:0});
+  while(stack.length){
+    const cur = stack[stack.length-1];
+    let moved=false;
+    const directions = shuffle(DIRS.slice());
+    for(const d of directions){
+      const nx=cur.x+d.dx, ny=cur.y+d.dy;
+      if(nx<0||ny<0||nx>=cols||ny>=rows) continue;
+      if(!cells[ny][nx].v){
+        cells[cur.y][cur.x][d.wall]=false;
+        cells[ny][nx][d.opp]=false;
+        cells[ny][nx].v=true;
+        stack.push({x:nx,y:ny});
+        moved=true;
+        break;
+      }
+    }
+    if(!moved) stack.pop();
+  }
+  return cells;
+}
+let maze;
+let pulse = 0;
+
+// Hitmap
+const hitCanvas = document.createElement('canvas');
+hitCanvas.width = canvas.width;
+hitCanvas.height = canvas.height;
+const htx = hitCanvas.getContext('2d');
+function buildHitMap(){
+  htx.fillStyle = '#fff'; htx.fillRect(0,0,hitCanvas.width,hitCanvas.height);
+  htx.strokeStyle = '#000'; htx.lineWidth = wallThickness;
+  const ox = padding, oy = padding;
+  for(let y=0;y<rows;y++){
+    for(let x=0;x<cols;x++){
+      const c=maze[y][x];
+      const cx = ox + x*cellSize, cy = oy + y*cellSize;
+      if(c.N){ htx.beginPath(); htx.moveTo(cx,cy); htx.lineTo(cx+cellSize,cy); htx.stroke(); }
+      if(c.S){ htx.beginPath(); htx.moveTo(cx,cy+cellSize); htx.lineTo(cx+cellSize,cy+cellSize); htx.stroke(); }
+      if(c.W){ htx.beginPath(); htx.moveTo(cx,cy); htx.lineTo(cx,cy+cellSize); htx.stroke(); }
+      if(c.E){ htx.beginPath(); htx.moveTo(cx+cellSize,cy); htx.lineTo(cx+cellSize,cy+cellSize); htx.stroke(); }
+    }
+  }
+}
+
+// Dibujar laberinto
+function drawMaze(){
+  const w=canvas.width,h=canvas.height;
+  const g = ctx.createLinearGradient(0,0,w,h); g.addColorStop(0,'#0b1220'); g.addColorStop(1,'#0a0f1a');
+  ctx.fillStyle=g; ctx.fillRect(0,0,w,h);
+  ctx.save(); ctx.globalAlpha=.15;
+  for(let i=0;i<120;i++){ ctx.beginPath(); ctx.arc(Math.random()*w,Math.random()*h,Math.random()*1.2+.3,0,Math.PI*2); ctx.fillStyle='#4da3ff'; ctx.fill(); } 
+  ctx.restore();
+  ctx.save(); ctx.strokeStyle='#2a6cff'; ctx.lineWidth=wallThickness; pulse += 0.08;
+const glow = 10 + Math.sin(pulse) * 8;
+
+ctx.shadowColor='#2a6cff';
+ctx.shadowBlur = glow;
+  const ox=padding, oy=padding;
+  for(let y=0;y<rows;y++){
+    for(let x=0;x<cols;x++){
+      const c=maze[y][x], cx=ox+x*cellSize, cy=oy+y*cellSize;
+      if(c.N){ ctx.beginPath(); ctx.moveTo(cx,cy); ctx.lineTo(cx+cellSize,cy); ctx.stroke(); }
+      if(c.S){ ctx.beginPath(); ctx.moveTo(cx,cy+cellSize); ctx.lineTo(cx+cellSize,cy+cellSize); ctx.stroke(); }
+      if(c.W){ ctx.beginPath(); ctx.moveTo(cx,cy); ctx.lineTo(cx,cy+cellSize); ctx.stroke(); }
+      if(c.E){ ctx.beginPath(); ctx.moveTo(cx+cellSize,cy); ctx.lineTo(cx+cellSize,cy+cellSize); ctx.stroke(); }
+    }
+  }
+  ctx.restore();
+  const start={x:padding+cellSize/2,y:padding+cellSize/2};
+  const goal={x:padding+(cols-1)*cellSize+cellSize/2,y:padding+(rows-1)*cellSize+cellSize/2};
+  ctx.save(); ctx.shadowBlur=28; ctx.shadowColor=startColor; ctx.fillStyle=startColor; drawDot(start.x,start.y,10); ctx.restore();
+  ctx.save(); ctx.shadowBlur=28; ctx.shadowColor=goalColor; ctx.fillStyle=goalColor; drawDot(goal.x,goal.y,10); ctx.restore();
+}
+function drawDot(x,y,r){ ctx.beginPath(); ctx.arc(x,y,r,0,Math.PI*2); ctx.fill(); }
+
+// Jugador
+let startPos, goalPos, player;
+
+function isWallPixel(px, py){ px=Math.max(0,Math.min(hitCanvas.width-1,px|0)); py=Math.max(0,Math.min(hitCanvas.height-1,py|0)); const d=htx.getImageData(px,py,1,1).data; return (d[0]<10 && d[1]<10 && d[2]<10); }
+function collidesCircle(cx, cy, r){ const S=36; for(let i=0;i<S;i++){ const a=(i/S)*Math.PI*2; if(isWallPixel(cx+Math.cos(a)*(r+1),cy+Math.sin(a)*(r+1))) return true; } if(isWallPixel(cx|0,cy|0)) return true; return false; }
+function redraw(){ ctx.clearRect(0,0,canvas.width,canvas.height); drawMaze(); if(player){ ctx.save(); ctx.shadowColor='#2a6cff'; ctx.shadowBlur=18; ctx.fillStyle='#4da3ff'; ctx.beginPath(); ctx.arc(player.x,player.y,player.r,0,Math.PI*2); ctx.fill(); ctx.restore(); ctx.beginPath(); ctx.lineWidth=2; ctx.strokeStyle='#e0fbff'; ctx.arc(player.x,player.y,player.r+2,0,Math.PI*2); ctx.stroke(); } }
+
+function tryMoveTo(nx, ny){
+  if(!player) return;
+  const dx=nx-player.x, dy=ny-player.y, dist=Math.hypot(dx,dy), step=1.5;
+  const steps=Math.max(1, Math.ceil(dist/step));
+  let px=player.x, py=player.y;
+  for(let i=1;i<=steps;i++){
+    const ix=player.x+(dx*i/steps), iy=player.y+(dy*i/steps);
+    if(!collidesCircle(ix,iy,player.r)){ px=ix; py=iy; } else break;
+  }
+  player.x=px; player.y=py;
+  redraw();
+
+  const gx=goalPos.x, gy=goalPos.y;
+  if((player.x-gx)**2 + (player.y-gy)**2 < (cellSize*0.25)**2){
+    clearInterval(intervalo);
+    player=null;
+    document.querySelector('.wrap').style.display='none';
+    document.getElementById('victory').style.visibility='visible';
+    setTimeout(()=>{
+      document.getElementById('victory').style.visibility='hidden';
+      document.getElementById('morsePanel').style.visibility='visible';
+    },800);
+  }
+}
+
+// Controles
+let dragging=false;
+canvas.addEventListener('pointerdown',e=>{ const rect=canvas.getBoundingClientRect(); const x=e.clientX-rect.left, y=e.clientY-rect.top; if((x-player.x)**2+(y-player.y)**2<=(player.r+12)**2){ dragging=true; canvas.setPointerCapture?.(e.pointerId); } },{passive:true});
+canvas.addEventListener('pointermove',e=>{ if(!dragging) return; const rect=canvas.getBoundingClientRect(); tryMoveTo(e.clientX-rect.left,e.clientY-rect.top); e.preventDefault(); },{passive:false});
+canvas.addEventListener('pointerup',e=>{ dragging=false; canvas.releasePointerCapture?.(e.pointerId); },{passive:true});
+canvas.addEventListener('pointercancel',()=>{ dragging=false; },{passive:true});
+
+// Reiniciar
+function reiniciarJuego(){
+  document.getElementById('victory').style.visibility='hidden';
+  document.getElementById('timeout').style.visibility='hidden';
+  maze = generateMaze();
+  buildHitMap();
+  startPos={x:padding+cellSize/2,y:padding+cellSize/2};
+  goalPos={x:padding+(cols-1)*cellSize+cellSize/2,y:padding+(rows-1)*cellSize+cellSize/2};
+  player={x:startPos.x,y:startPos.y,r:playerRadius};
+  drawMaze(); redraw();
+  iniciarTimer();
+}
+
+// ====== Panel de reproducción ======
+const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+const morseBtn = document.getElementById('btnPlay');
+const seekBar = document.getElementById('morseSeek');
+let currentIndex = 0;
+let playing=false;
+let morseTimeout;
+const morseCode = "·--· ·- --· ·· -· ·- / ··---"; // tu código
+function playMorse(index = currentIndex) {
+
+  if (!playing) return;
+
+  if (index >= morseCode.length) {
+    playing = false;
+    morseBtn.textContent = "▶ Reproducir";
+    return;
+  }
+
+  currentIndex = index;
+
+  const char = morseCode[index];
+
+  if (char === ".") beep(100);
+  if (char === "-") beep(300);
+
+  seekBar.value = (index / morseCode.length) * 100;
+
+  morseTimeout = setTimeout(() => {
+    playMorse(index + 1);
+  }, char === " " ? 200 : 400);
+}
+function beep(duration){
+
+  const ctxA = new (window.AudioContext || window.webkitAudioContext)();
+
+  const osc = ctxA.createOscillator();
+  const gain = ctxA.createGain();
+  const filter = ctxA.createBiquadFilter();
+
+  // sonido tipo radio
+  osc.type = "square";
+  osc.frequency.value = 750;
+
+  // filtro estilo walkie-talkie
+  filter.type = "bandpass";
+  filter.frequency.value = 1200;
+
+  gain.gain.value = 0.15;
+
+  osc.connect(filter);
+  filter.connect(gain);
+  gain.connect(ctxA.destination);
+
+  osc.start();
+  osc.stop(ctxA.currentTime + duration/1000);
+
+  // ruido estático
+  const bufferSize = ctxA.sampleRate * 0.2;
+  const noiseBuffer = ctxA.createBuffer(1, bufferSize, ctxA.sampleRate);
+  const data = noiseBuffer.getChannelData(0);
+
+  for (let i = 0; i < bufferSize; i++) {
+    data[i] = Math.random() * 2 - 1;
+  }
+
+  const noise = ctxA.createBufferSource();
+  const noiseGain = ctxA.createGain();
+
+  noise.buffer = noiseBuffer;
+  noiseGain.gain.value = 0.03;
+
+  noise.connect(noiseGain);
+  noiseGain.connect(ctxA.destination);
+
+  noise.start();
+  noise.stop(ctxA.currentTime + duration/1000);
+}
+morseBtn.addEventListener("click", () => {
+
+  if (playing) {
+
+    playing = false;
+    clearTimeout(morseTimeout);
+    morseBtn.textContent = "▶ Reproducir";
+
+  } else {
+
+    playing = true;
+    morseBtn.textContent = "⏸ Pausar";
+    playMorse(currentIndex);
+
+  }
+
+});
+seekBar.addEventListener("input", () => {
+  currentIndex = Math.floor((seekBar.value / 100) * morseCode.length);
+
+  if(playing){
+    clearTimeout(morseTimeout);
+    playMorse(currentIndex);
+  }
+});
+function animate(){
+  redraw();
+  requestAnimationFrame(animate);
+}
+
+animate();
+</script>
+</body>
+</html>
